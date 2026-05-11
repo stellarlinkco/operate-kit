@@ -80,3 +80,7 @@ sdk.run_flow_spec(flow, raise_on_failure=False)
 ## Architecture in one line
 
 `solutions -> rpa -> runtime -> core`, while `plugins/android`, `plugins/windows`, and `plugins/capture` implement ports. Core and runtime never import `adbutils`, `uiautomator2`, `pywinauto`, or `mitmproxy`.
+
+## License
+
+MIT
