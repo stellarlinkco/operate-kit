@@ -16,6 +16,8 @@ from operatekit.runtime.runner import WorkflowRunner
 from operatekit.runtime.sdk import AutomationSDK
 from operatekit.runtime.tracing import TraceConfig, TraceRecorder
 
+__version__ = "0.4.1"
+
 __all__ = [
     "Actions",
     "AutomationTool",
@@ -46,4 +48,5 @@ __all__ = [
     "ToolRegistry",
     "WorkflowRunner",
     "WorkflowStatus",
+    "__version__",
 ]
