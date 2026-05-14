@@ -17,6 +17,7 @@ from operatekit.runtime.context import RunContext
 from operatekit.runtime.ledger import JsonlRunLedger
 from operatekit.runtime.notifier import JsonlNotifier
 from operatekit.runtime.runner import WorkflowRunner
+from operatekit.runtime.hooks import RuntimeHook, Stabilizer, StabilizationConfig
 from operatekit.runtime.tracing import TraceConfig, TraceRecorder
 
 
@@ -28,6 +29,8 @@ class AutomationSDK:
         surface: SurfaceDriver,
         host: HostDriver | None = None,
         artifacts_dir: str | Path = "./artifacts",
+        hooks: Iterable[RuntimeHook] = (),
+        stabilization: StabilizationConfig | None = None,
     ):
         self.target = target
         self.artifacts_dir = Path(artifacts_dir)
@@ -35,6 +38,7 @@ class AutomationSDK:
         self.observations = JsonlObservationRepository(self.artifacts_dir / "observations.jsonl")
         self.ledger = JsonlRunLedger(self.artifacts_dir / "runs.jsonl")
         self.notifier = JsonlNotifier(self.artifacts_dir / "events.jsonl")
+        self.stabilizer = Stabilizer(list(hooks), config=stabilization)
         self.context = RunContext(
             target=target,
             host=host,
@@ -42,6 +46,7 @@ class AutomationSDK:
             observations=self.observations,
             artifacts_dir=self.artifacts_dir,
             notifier=self.notifier,
+            stabilizer=self.stabilizer,
         )
         self.runner = WorkflowRunner(self.ledger)
         self.flow_compiler = FlowCompiler()
@@ -89,13 +94,18 @@ class AutomationSDK:
         surface: SurfaceDriver,
         host: HostDriver | None = None,
         artifacts_dir: str | Path = "./artifacts",
+        hooks: Iterable[RuntimeHook] = (),
+        stabilization: StabilizationConfig | None = None,
     ) -> "AutomationSDK":
-        return cls(target=target, surface=surface, host=host, artifacts_dir=artifacts_dir)
+        return cls(target=target, surface=surface, host=host, artifacts_dir=artifacts_dir, hooks=hooks, stabilization=stabilization)
 
     def enable_trace(self, config: TraceConfig | None = None) -> TraceRecorder:
         recorder = TraceRecorder(self.artifacts_dir, config=config)
         self.context.trace = recorder
         return recorder
+
+    def register_hook(self, hook: RuntimeHook) -> None:
+        self.stabilizer.add_hook(hook)
 
     def run_steps(self, name: str, steps: Iterable[Step], *, raise_on_failure: bool = True):
         return self.runner.run_steps(name, list(steps), self.context, raise_on_failure=raise_on_failure)

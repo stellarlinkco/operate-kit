@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class StepStatus(str, Enum):
@@ -17,7 +18,40 @@ class WorkflowStatus(str, Enum):
     RUNNING = "running"
     PASSED = "passed"
     FAILED = "failed"
+    MANUAL_REQUIRED = "manual_required"
     CANCELLED = "cancelled"
+
+
+class HookOutcome(str, Enum):
+    NOOP = "noop"
+    HANDLED = "handled"
+    MANUAL_REQUIRED = "manual_required"
+    RETRY_STEP = "retry_step"
+    FAIL_WORKFLOW = "fail_workflow"
+
+
+@dataclass(frozen=True)
+class RuntimeObservation:
+    ui_tree: str
+    package: str | None = None
+    activity: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class HookResult:
+    outcome: HookOutcome
+    reason: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StabilizationResult:
+    outcome: HookOutcome
+    reason: str | None = None
+    observation: RuntimeObservation | None = None
+    hook_name: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

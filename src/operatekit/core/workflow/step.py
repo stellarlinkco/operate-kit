@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable
 import time
 
 from operatekit.core.shared.errors import StepExecutionError
 from operatekit.core.shared.ids import StepId
 from operatekit.core.shared.time import utc_now_iso
-from operatekit.core.workflow.value_objects import RetryPolicy, StepStatus
+from operatekit.core.workflow.value_objects import HookOutcome, RetryPolicy, StepStatus
 
-if TYPE_CHECKING:
-    from operatekit.runtime.context import RunContext
-
-StepFn = Callable[["RunContext"], Any]
+StepFn = Callable[[Any], Any]
 
 
 @dataclass
@@ -47,20 +44,40 @@ class Step:
     action: StepFn
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
     metadata: dict[str, Any] = field(default_factory=dict)
+    hookable: bool = False
     step_id: StepId = field(default_factory=StepId.new)
 
-    def execute(self, ctx: "RunContext") -> StepResult:
+    def execute(self, ctx: Any) -> StepResult:
         started = utc_now_iso()
         delay = self.retry_policy.delay_seconds
         attempts = 0
         last_error: str | None = None
+        last_metadata: dict[str, Any] | None = None
 
         for attempt in range(1, self.retry_policy.max_attempts + 1):
             attempts = attempt
             if ctx.trace is not None:
                 ctx.trace.before_step(ctx, self, attempt)
             try:
+                if self.hookable and ctx.stabilizer is not None:
+                    pre_result = ctx.stabilizer.stabilize(ctx, step_name=self.name, phase="pre")
+                    if pre_result.outcome == HookOutcome.RETRY_STEP and attempt < self.retry_policy.max_attempts:
+                        if delay:
+                            time.sleep(delay)
+                            delay *= self.retry_policy.backoff_multiplier
+                        continue
+                    if pre_result.outcome != HookOutcome.NOOP:
+                        return _hook_step_result(self, started, attempts, pre_result)
                 output = self.action(ctx)
+                if self.hookable and ctx.stabilizer is not None:
+                    post_result = ctx.stabilizer.stabilize(ctx, step_name=self.name, phase="post")
+                    if post_result.outcome == HookOutcome.RETRY_STEP and attempt < self.retry_policy.max_attempts:
+                        if delay:
+                            time.sleep(delay)
+                            delay *= self.retry_policy.backoff_multiplier
+                        continue
+                    if post_result.outcome != HookOutcome.NOOP:
+                        return _hook_step_result(self, started, attempts, post_result)
                 ended = utc_now_iso()
                 result = StepResult(
                     step_id=str(self.step_id),
@@ -77,6 +94,11 @@ class Step:
                 return result
             except Exception as exc:  # noqa: BLE001 - wrap any step failure with ledger info
                 last_error = f"{type(exc).__name__}: {exc}"
+                if isinstance(exc, StepExecutionError):
+                    failed_result = getattr(exc, "step_result", None)
+                    failed_metadata = getattr(failed_result, "metadata", None)
+                    if isinstance(failed_metadata, dict):
+                        last_metadata = failed_metadata
                 if ctx.trace is not None:
                     ctx.trace.step_error(ctx, self, attempt, exc)
                 if attempt >= self.retry_policy.max_attempts:
@@ -94,17 +116,46 @@ class Step:
             started_at=started,
             ended_at=ended,
             error=last_error,
-            metadata=dict(self.metadata),
+            metadata={**self.metadata, **(last_metadata or {})},
         )
         if ctx.trace is not None:
             ctx.trace.after_step(ctx, self, result)
         return result
 
     @staticmethod
-    def from_callable(name: str, func: StepFn, *, retry_policy: RetryPolicy | None = None, **metadata: Any) -> "Step":
-        return Step(name=name, action=func, retry_policy=retry_policy or RetryPolicy(), metadata=metadata)
+    def from_callable(name: str, func: StepFn, *, retry_policy: RetryPolicy | None = None, hookable: bool = False, **metadata: Any) -> "Step":
+        return Step(name=name, action=func, retry_policy=retry_policy or RetryPolicy(), metadata=metadata, hookable=hookable)
+
+
+def _hook_step_result(step: Step, started: str, attempts: int, hook_result: Any) -> StepResult:
+    observation = hook_result.observation
+    metadata = {
+        **step.metadata,
+        "runtime_hook": {
+            "outcome": hook_result.outcome.value,
+            "reason": hook_result.reason,
+            "hook": hook_result.hook_name,
+            "last_observation": None if observation is None else {
+                "ui_tree": observation.ui_tree,
+                "package": observation.package,
+                "activity": observation.activity,
+                "metadata": observation.metadata,
+            },
+            "metadata": hook_result.metadata,
+        },
+    }
+    return StepResult(
+        step_id=str(step.step_id),
+        name=step.name,
+        status=StepStatus.FAILED,
+        attempts=attempts,
+        started_at=started,
+        ended_at=utc_now_iso(),
+        error=hook_result.reason or f"runtime hook requested {hook_result.outcome.value}",
+        metadata=metadata,
+    )
 
 
 def ensure_passed(result: StepResult) -> None:
     if result.status != StepStatus.PASSED:
-        raise StepExecutionError(result.error or f"step failed: {result.name}")
+        raise StepExecutionError(result.error or f"step failed: {result.name}", step_result=result)

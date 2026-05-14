@@ -23,6 +23,7 @@ class RunContext:
     variables: dict[str, Any] = field(default_factory=dict)
     notifier: Notifier | None = None
     trace: Any | None = None
+    stabilizer: Any | None = None
 
     def __post_init__(self) -> None:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)

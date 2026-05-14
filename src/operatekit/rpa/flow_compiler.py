@@ -5,7 +5,8 @@ from typing import Any
 from operatekit.core.ui.locator import Locator
 from operatekit.core.workflow.step import Step
 from operatekit.rpa.actions import Actions
-from operatekit.rpa.blockers import BlockerManager
+from operatekit.rpa.blockers import BlockerManager, LegacyBlockerHook
+from operatekit.runtime.hooks import Stabilizer
 from operatekit.rpa.flow_spec import CommandSpec, FlowSpec
 from operatekit.rpa.screen_object import locator_from_spec
 
@@ -62,8 +63,13 @@ class FlowCompiler:
         if name == "sleep":
             return Actions.sleep(float(params))
         if name == "checkBlockers":
-            manager = self.blocker_manager or BlockerManager()
-            return Actions.call("check_blockers", lambda ctx: manager.check_and_dismiss(ctx.surface))
+            manager = self.blocker_manager
+
+            def _check_blockers(ctx: Any) -> dict[str, Any]:
+                stabilizer = _check_blockers_stabilizer(getattr(ctx, "stabilizer", None), manager)
+                return stabilizer.stabilize(ctx, step_name="check_blockers", phase="compat").metadata
+
+            return Actions.call("check_blockers", _check_blockers)
         if name == "retry":
             inner = params.get("commands", [])
             steps = FlowCompiler(blocker_manager=self.blocker_manager).compile({"name": params.get("name", "retry"), "commands": inner})
@@ -74,6 +80,19 @@ class FlowCompiler:
                 delay_seconds=float(params.get("delay", params.get("delaySeconds", 0))),
             )
         raise ValueError(f"unsupported command: {name}")
+
+
+def _check_blockers_stabilizer(active: Stabilizer | None, manager: BlockerManager | None) -> Stabilizer:
+    rules = list(manager.rules) if manager is not None else []
+    if active is None:
+        return Stabilizer([LegacyBlockerHook(rules)] if rules else [])
+    if not rules or _has_legacy_blocker_hook(active, rules):
+        return active
+    return Stabilizer([*active.hooks, LegacyBlockerHook(rules)], config=active.config, observer=active.observer)
+
+
+def _has_legacy_blocker_hook(stabilizer: Stabilizer, rules: list[Any]) -> bool:
+    return any(isinstance(hook, LegacyBlockerHook) and hook.rules == rules for hook in stabilizer.hooks)
 
 
 def _locator_and_timeout(params: dict[str, Any]) -> tuple[Locator, float]:

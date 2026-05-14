@@ -28,6 +28,9 @@ class TraceRecorder:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"event": event, "at": utc_now_iso(), **data}, ensure_ascii=False) + "\n")
 
+    def event(self, event: str, ctx: Any, payload: dict[str, Any]) -> None:
+        self._write(event, {"run_id": str(ctx.run_id), **payload})
+
     def before_step(self, ctx: Any, step: Step, attempt: int) -> None:
         record: dict[str, Any] = {"run_id": str(ctx.run_id), "step": step.name, "attempt": attempt, "metadata": step.metadata}
         if self.config.capture_ui_tree:

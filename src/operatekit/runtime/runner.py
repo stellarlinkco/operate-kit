@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Iterable
 
 from operatekit.core.shared.errors import StepExecutionError
 from operatekit.core.workflow.run import WorkflowRun
@@ -8,11 +9,16 @@ from operatekit.core.workflow.step import Step
 from operatekit.core.workflow.value_objects import StepStatus, WorkflowStatus
 from operatekit.ports.run_ledger import RunLedger
 from operatekit.runtime.context import RunContext
+from operatekit.runtime.hooks import RuntimeHook, Stabilizer, StabilizationConfig
 
 
 class WorkflowRunner:
-    def __init__(self, ledger: RunLedger | None = None):
+    def __init__(self, ledger: RunLedger | None = None, *, hooks: Iterable[RuntimeHook] = (), stabilization: StabilizationConfig | None = None):
         self.ledger = ledger
+        self.stabilizer = Stabilizer(list(hooks), config=stabilization)
+
+    def register_hook(self, hook: RuntimeHook) -> None:
+        self.stabilizer.add_hook(hook)
 
     def run_steps(
         self,
@@ -22,6 +28,8 @@ class WorkflowRunner:
         *,
         raise_on_failure: bool = True,
     ) -> WorkflowRun:
+        if ctx.stabilizer is None and self.stabilizer.hooks:
+            ctx.stabilizer = self.stabilizer
         run = WorkflowRun(name=name)
         run.run_id = ctx.run_id
         run.start()
@@ -32,6 +40,16 @@ class WorkflowRunner:
             run.add_step_result(result)
             if result.status != StepStatus.PASSED:
                 failed = True
+                hook_metadata = result.metadata.get("runtime_hook") if isinstance(result.metadata, dict) else None
+                if hook_metadata and hook_metadata.get("outcome") == "manual_required":
+                    run.metadata["runtime_hook"] = hook_metadata
+                    run.finish(WorkflowStatus.MANUAL_REQUIRED)
+                    if self.ledger is not None:
+                        self.ledger.record_run(run)
+                    ctx.notify("workflow.manual_required", {"name": name, "step": step.name, "reason": result.error})
+                    return run
+                if hook_metadata:
+                    run.metadata["runtime_hook"] = hook_metadata
                 run.finish(WorkflowStatus.FAILED)
                 if self.ledger is not None:
                     self.ledger.record_run(run)
