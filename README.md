@@ -79,14 +79,26 @@ flow = {
 sdk.run_flow_spec(flow, raise_on_failure=False)
 ```
 
+## Examples
+
+| Example | Description |
+|---------|-------------|
+| [android_flow.py](examples/android_flow.py) | Android: launch, tap, type, scroll, retry block, deeplink |
+| [windows_flow.py](examples/windows_flow.py) | Windows: notepad automation, locator types |
+| [cross_surface_flow_spec.py](examples/cross_surface_flow_spec.py) | FlowSpec: all declarative commands |
+| [runtime_hooks.py](examples/runtime_hooks.py) | Runtime Hooks: permission, captcha, network error, custom hook, InterferenceResult |
+| [screen_object.py](examples/screen_object.py) | ScreenObject: page object pattern |
+| [trace_and_observation.py](examples/trace_and_observation.py) | Trace & mitmproxy network capture |
+| [agent_tool_registry.py](examples/agent_tool_registry.py) | Agent ToolRegistry: risk policies, approval |
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| **[Usage Guide (English)](docs/usage-guide.md)** | Full API reference — Actions, FlowSpec, ScreenObject, Runtime Hooks, Observation, Trace, Agent ToolRegistry |
-| **[使用指南 (中文)](docs/usage-guide-zh.md)** | 全量 API 文档 — Actions、FlowSpec、ScreenObject、Runtime Hooks、观测抓包、Trace、Agent ToolRegistry |
+| **[Usage Guide (English)](docs/usage-guide.md)** | Full API reference |
+| **[使用指南 (中文)](docs/usage-guide-zh.md)** | 全量 API 文档 |
 | [Architecture](docs/architecture.md) | Layering design and module responsibilities |
-| [Runtime Hooks Spec](docs/feature-spec/runtime-hooks-feature-spec.md) | Feature specification for the interference handling mechanism |
+| [Runtime Hooks Spec](docs/feature-spec/runtime-hooks-feature-spec.md) | Interference handling feature spec |
 
 ## Architecture
 
