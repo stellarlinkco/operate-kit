@@ -77,6 +77,12 @@ flow = {
 sdk.run_flow_spec(flow, raise_on_failure=False)
 ```
 
+## Documentation
+
+- **[SDK 使用指南](docs/usage-guide.md)** — 全量 API 文档，涵盖安装、Android/Windows 快速开始、Actions、FlowSpec、ScreenObject、Runtime Hooks、观测抓包、Trace、Agent ToolRegistry
+- [架构文档](docs/architecture.md) — 分层设计和模块职责
+- [Runtime Hooks 特性规格](docs/feature-spec/runtime-hooks-feature-spec.md) — 干扰处理机制的设计规格
+
 ## Architecture in one line
 
 `solutions -> rpa -> runtime -> core`, while `plugins/android`, `plugins/windows`, and `plugins/capture` implement ports. Core and runtime never import `adbutils`, `uiautomator2`, `pywinauto`, or `mitmproxy`.
