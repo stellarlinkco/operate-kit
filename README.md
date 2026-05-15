@@ -1,20 +1,23 @@
 # OperateKit Automation SDK
 
-OperateKit is an RPA-first, cross-surface automation runtime SDK. The current priority is Android + Windows PC automation. The architecture is agent-ready, but the agent layer stays above the deterministic RPA runtime.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Why this name
+OperateKit is an RPA-first, cross-surface automation runtime SDK. Currently supports **Android** and **Windows** platforms. The architecture is agent-ready, but the agent layer stays above the deterministic RPA runtime.
 
-The old `mobile-agent-sdk` name over-constrained the project: it sounded mobile-only and agent-first. OperateKit is an automation runtime: Android apps, Windows desktop applications, network observations, workflow retry, traces, cache, and future LLM/agent decisions all fit under the same execution model.
+> The old `mobile-agent-sdk` name over-constrained the project — it sounded mobile-only and agent-first. OperateKit fits Android apps, Windows desktop applications, network observations, workflow retry, traces, and future LLM/agent decisions under the same execution model.
 
 ## Install
 
 ```bash
-pip install -e .[android]
-pip install -e .[windows]
-pip install -e .[capture]
+pip install -e .[android]          # Android (uiautomator2 + adbutils)
+pip install -e .[windows]          # Windows (pywinauto)
+pip install -e .[capture]          # Network capture (mitmproxy)
+pip install -e .[android,windows,capture]  # All
 ```
 
-## Android
+## Quick Start
+
+### Android
 
 ```python
 from operatekit import AutomationSDK, Actions, Locator
@@ -25,33 +28,33 @@ sdk = AutomationSDK.create_android(
     artifacts_dir="./artifacts",
 )
 
-sdk.run_steps("android_search", [
+sdk.run_steps("search", [
     Actions.launch(),
-    Actions.tap(Locator.text("搜索")),
+    Actions.tap(Locator.text("Search")),
     Actions.type_text("keyword", clear=True),
     Actions.press_key("enter"),
 ])
 ```
 
-## Windows / pywinauto
+### Windows
 
 ```python
 from operatekit import AutomationSDK, Actions, Locator
 
 sdk = AutomationSDK.create_windows(
-    executable=r"C:\\Windows\\System32\\notepad.exe",
+    executable=r"C:\Windows\System32\notepad.exe",
     backend="uia",
     artifacts_dir="./artifacts",
 )
 
-sdk.run_steps("windows_notepad", [
+sdk.run_steps("notepad", [
     Actions.launch(),
     Actions.type_text("hello from OperateKit"),
     Actions.press_key("ctrl+s"),
 ])
 ```
 
-## FlowSpec
+### FlowSpec (Declarative)
 
 ```python
 flow = {
@@ -62,16 +65,15 @@ flow = {
             "name": "submit_and_wait",
             "maxRetries": 3,
             "commands": [
-                {"tap": {"text": "提交"}},
-                {"waitObservation": {
-                    "kind": "network",
+                {"tap": {"text": "Submit"}},
+                {"waitPayload": {
                     "pattern": "contains:/api/result",
                     "timeout": 30,
-                    "storeKey": "result_payload"
-                }}
-            ]
-        }}
-    ]
+                    "storeKey": "result_payload",
+                }},
+            ],
+        }},
+    ],
 }
 
 sdk.run_flow_spec(flow, raise_on_failure=False)
@@ -79,13 +81,27 @@ sdk.run_flow_spec(flow, raise_on_failure=False)
 
 ## Documentation
 
-- **[SDK 使用指南](docs/usage-guide.md)** — 全量 API 文档，涵盖安装、Android/Windows 快速开始、Actions、FlowSpec、ScreenObject、Runtime Hooks、观测抓包、Trace、Agent ToolRegistry
-- [架构文档](docs/architecture.md) — 分层设计和模块职责
-- [Runtime Hooks 特性规格](docs/feature-spec/runtime-hooks-feature-spec.md) — 干扰处理机制的设计规格
+| Document | Description |
+|----------|-------------|
+| **[Usage Guide (English)](docs/usage-guide.md)** | Full API reference — Actions, FlowSpec, ScreenObject, Runtime Hooks, Observation, Trace, Agent ToolRegistry |
+| **[使用指南 (中文)](docs/usage-guide-zh.md)** | 全量 API 文档 — Actions、FlowSpec、ScreenObject、Runtime Hooks、观测抓包、Trace、Agent ToolRegistry |
+| [Architecture](docs/architecture.md) | Layering design and module responsibilities |
+| [Runtime Hooks Spec](docs/feature-spec/runtime-hooks-feature-spec.md) | Feature specification for the interference handling mechanism |
 
-## Architecture in one line
+## Architecture
 
-`solutions -> rpa -> runtime -> core`, while `plugins/android`, `plugins/windows`, and `plugins/capture` implement ports. Core and runtime never import `adbutils`, `uiautomator2`, `pywinauto`, or `mitmproxy`.
+```
+solutions/*
+  -> operatekit.rpa        # Actions, FlowSpec, ScreenObject, Generic Hooks
+  -> operatekit.runtime    # SDK, Runner, Stabilizer, Hooks, Context, Trace
+  -> operatekit.core       # Step, StepResult, Locator, Observation, ValueObjects
+
+plugins/android|windows|capture
+  -> operatekit.ports      # SurfaceDriver, HostDriver, Notifier, RunLedger
+  -> operatekit.core
+```
+
+Core and runtime never import platform libraries (`adbutils`, `uiautomator2`, `pywinauto`, `mitmproxy`).
 
 ## License
 

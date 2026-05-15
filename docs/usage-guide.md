@@ -1,49 +1,52 @@
-# OperateKit SDK 使用指南
+# OperateKit SDK Usage Guide
 
-OperateKit 是一个 RPA 优先的跨平台自动化运行时 SDK。当前支持 Android 和 Windows 两个平台，架构上为 Agent（LLM 决策）预留了扩展层，但核心执行层保持确定性。
+[中文版](usage-guide-zh.md)
 
-## 目录
+OperateKit is an RPA-first, cross-surface automation runtime SDK. Currently supports Android and Windows. The architecture reserves an extension layer for Agent (LLM decisioning) while keeping the core execution layer deterministic.
 
-- [安装](#安装)
-- [快速开始](#快速开始)
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
   - [Android](#android)
   - [Windows](#windows)
-- [Locator 定位器](#locator-定位器)
+  - [Custom Drivers](#custom-drivers)
+- [Locator](#locator)
 - [Actions API](#actions-api)
-- [FlowSpec 声明式流程](#flowspec-声明式流程)
-- [ScreenObject 页面对象](#screenobject-页面对象)
-- [Runtime Hooks 运行时干扰处理](#runtime-hooks-运行时干扰处理)
-  - [注册 Hook](#注册-hook)
-  - [内置 Generic Hooks](#内置-generic-hooks)
-  - [自定义 App-specific Hook](#自定义-app-specific-hook)
-  - [InterferenceResult 类型化结果](#interferenceresult-类型化结果)
-  - [StabilizationConfig 预算配置](#stabilizationconfig-预算配置)
-- [观测与网络抓包](#观测与网络抓包)
-- [Trace 执行追踪](#trace-执行追踪)
+- [FlowSpec (Declarative Workflows)](#flowspec-declarative-workflows)
+- [ScreenObject (Page Object)](#screenobject-page-object)
+- [Runtime Hooks (Interference Handling)](#runtime-hooks-interference-handling)
+  - [Registering Hooks](#registering-hooks)
+  - [Built-in Generic Hooks](#built-in-generic-hooks)
+  - [Custom App-specific Hooks](#custom-app-specific-hooks)
+  - [InterferenceResult (Typed Result)](#interferenceresult-typed-result)
+  - [StabilizationConfig (Budget)](#stabilizationconfig-budget)
+- [Observation & Network Capture](#observation--network-capture)
+- [Trace (Execution Recording)](#trace-execution-recording)
 - [Agent ToolRegistry](#agent-toolregistry)
-- [架构概览](#架构概览)
+- [Architecture Overview](#architecture-overview)
 
 ---
 
-## 安装
+## Installation
 
 ```bash
-# Android 自动化（依赖 uiautomator2 + adbutils）
+# Android automation (requires uiautomator2 + adbutils)
 pip install -e .[android]
 
-# Windows 自动化（依赖 pywinauto）
+# Windows automation (requires pywinauto)
 pip install -e .[windows]
 
-# 网络抓包（依赖 mitmproxy）
+# Network capture (requires mitmproxy)
 pip install -e .[capture]
 
-# 全部安装
+# All extras
 pip install -e .[android,windows,capture]
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
 ### Android
 
@@ -52,14 +55,14 @@ from operatekit import AutomationSDK, Actions, Locator
 
 sdk = AutomationSDK.create_android(
     package="com.example.app",
-    serial=None,              # 自动检测设备；多设备时指定序列号
+    serial=None,              # auto-detect; specify serial for multi-device
     artifacts_dir="./artifacts",
 )
 
-run = sdk.run_steps("搜索流程", [
+run = sdk.run_steps("search_flow", [
     Actions.launch(),
-    Actions.tap(Locator.text("搜索")),
-    Actions.type_text("关键词", clear=True),
+    Actions.tap(Locator.text("Search")),
+    Actions.type_text("keyword", clear=True),
     Actions.press_key("enter"),
     Actions.scroll("down"),
 ])
@@ -74,18 +77,18 @@ from operatekit import AutomationSDK, Actions, Locator
 
 sdk = AutomationSDK.create_windows(
     executable=r"C:\Windows\System32\notepad.exe",
-    backend="uia",            # "uia" 或 "win32"
+    backend="uia",            # "uia" or "win32"
     artifacts_dir="./artifacts",
 )
 
-run = sdk.run_steps("记事本测试", [
+run = sdk.run_steps("notepad_test", [
     Actions.launch(),
     Actions.type_text("hello from OperateKit"),
     Actions.press_key("ctrl+s"),
 ])
 ```
 
-### 自定义 Driver
+### Custom Drivers
 
 ```python
 from operatekit import AutomationSDK, TargetSpec
@@ -100,29 +103,29 @@ sdk = AutomationSDK.create_with_drivers(
 
 ---
 
-## Locator 定位器
+## Locator
 
-`Locator` 是平台无关的 UI 元素定位描述。Android 平台自动转换为 XPath，Windows 平台自动转换为 pywinauto `child_window` 参数。
+`Locator` is a platform-agnostic UI element descriptor. Automatically translates to Android XPath or pywinauto `child_window` kwargs depending on the active surface.
 
 ```python
 from operatekit import Locator
 
-# 通用
-Locator.text("提交")
+# Cross-platform
+Locator.text("Submit")
 Locator.xpath('//*[@resource-id="com.example:id/btn"]')
 
-# Android 专用
+# Android-specific
 Locator.resource_id("com.example:id/search_input")
-Locator.content_desc("返回按钮")
+Locator.content_desc("Back button")
 
-# Windows 专用
+# Windows-specific
 Locator.automation_id("submitButton")
-Locator.title("文件")
-Locator.name("保存")
+Locator.title("File")
+Locator.name("Save")
 Locator.control_type("Button")
 Locator.class_name("Edit")
 
-# 坐标（慎用）
+# Coordinates (use sparingly)
 Locator.coordinates(500, 300)
 ```
 
@@ -130,38 +133,38 @@ Locator.coordinates(500, 300)
 
 ## Actions API
 
-`Actions` 是平台无关的 RPA 步骤工厂。每个方法返回一个 `Step` 对象，交给 `sdk.run_steps()` 执行。
+`Actions` is a platform-agnostic RPA step factory. Each method returns a `Step` object to be executed by `sdk.run_steps()`.
 
-### 交互类（Business Step，会触发 Stabilization）
+### Business Steps (trigger Stabilization)
 
-| 方法 | 说明 |
-|------|------|
-| `Actions.launch(stop=False)` | 启动目标应用 |
-| `Actions.close()` | 关闭目标应用 |
-| `Actions.tap(locator, timeout=10)` | 点击元素 |
-| `Actions.type_text(text, locator=None, clear=False, timeout=10)` | 输入文本 |
-| `Actions.press_key(key)` | 按键（如 `"enter"`, `"back"`, `"ctrl+s"`） |
-| `Actions.scroll(direction="down", amount=0.8)` | 滚动 |
-| `Actions.deeplink(url)` | 打开 deeplink |
+| Method | Description |
+|--------|-------------|
+| `Actions.launch(stop=False)` | Launch the target application |
+| `Actions.close()` | Close the target application |
+| `Actions.tap(locator, timeout=10)` | Tap an element |
+| `Actions.type_text(text, locator=None, clear=False, timeout=10)` | Type text |
+| `Actions.press_key(key)` | Press a key (e.g. `"enter"`, `"back"`, `"ctrl+s"`) |
+| `Actions.scroll(direction="down", amount=0.8)` | Scroll |
+| `Actions.deeplink(url)` | Open a deeplink |
 
-### 辅助类（Internal Step，不触发 Stabilization）
+### Internal Steps (no Stabilization)
 
-| 方法 | 说明 |
-|------|------|
-| `Actions.wait_visible(locator, timeout=10)` | 等待元素可见 |
-| `Actions.sleep(seconds)` | 等待固定时间 |
-| `Actions.shell(command, timeout=None, store_key=None)` | 执行 shell 命令 |
-| `Actions.capture_cursor(key)` | 捕获观测游标 |
-| `Actions.wait_observation(kind=None, pattern=..., cursor_key=None, timeout=30, store_key=None)` | 等待匹配的观测 |
-| `Actions.wait_payload(pattern, cursor_key=None, timeout=30, store_key=None)` | 等待网络观测（`wait_observation` 的 `kind=network` 快捷方式） |
+| Method | Description |
+|--------|-------------|
+| `Actions.wait_visible(locator, timeout=10)` | Wait for an element to become visible |
+| `Actions.sleep(seconds)` | Wait a fixed duration |
+| `Actions.shell(command, timeout=None, store_key=None)` | Execute a shell command |
+| `Actions.capture_cursor(key)` | Capture an observation cursor |
+| `Actions.wait_observation(kind=None, pattern=..., cursor_key=None, timeout=30, store_key=None)` | Wait for a matching observation |
+| `Actions.wait_payload(pattern, cursor_key=None, timeout=30, store_key=None)` | Wait for a network observation (shortcut for `wait_observation` with `kind=network`) |
 
-### 重试块
+### Retry Block
 
 ```python
 Actions.retry_block(
-    "提交并等待",
+    "submit_and_wait",
     [
-        Actions.tap(Locator.text("提交")),
+        Actions.tap(Locator.text("Submit")),
         Actions.wait_payload("contains:/api/result", timeout=30, store_key="result"),
     ],
     max_retries=3,
@@ -170,24 +173,24 @@ Actions.retry_block(
 )
 ```
 
-`retry_block` 内的子 Business Step 仍然会触发 Stabilization。如果子步骤因 Runtime Hook 产生终端结果（如 `manual_required`），retry_block 会立即传播，不会重试。
+Child Business Steps inside a retry block still trigger Stabilization. If a child step produces a terminal hook outcome (e.g. `manual_required`), the retry block propagates it immediately without retrying.
 
-### 自定义步骤
+### Custom Steps
 
 ```python
-# 默认 Internal Step（不触发 Stabilization）
-Actions.call("自定义操作", lambda ctx: do_something(ctx))
+# Default: Internal Step (no Stabilization)
+Actions.call("custom_op", lambda ctx: do_something(ctx))
 
-# 显式声明为 Business Step（会触发 Stabilization）
-Actions.call("自定义业务操作", lambda ctx: do_something(ctx), hookable=True)
+# Explicitly opt in to Stabilization
+Actions.call("custom_business_op", lambda ctx: do_something(ctx), hookable=True)
 ```
 
-### 重试策略
+### Retry Policy
 
 ```python
 from operatekit import RetryPolicy
 
-step = Actions.tap(Locator.text("提交"))
+step = Actions.tap(Locator.text("Submit"))
 step.retry_policy = RetryPolicy(
     max_attempts=3,
     delay_seconds=1.0,
@@ -197,20 +200,20 @@ step.retry_policy = RetryPolicy(
 
 ---
 
-## FlowSpec 声明式流程
+## FlowSpec (Declarative Workflows)
 
-FlowSpec 用字典/JSON 描述自动化流程，适合配置驱动的场景。
+FlowSpec describes automation workflows using dictionaries / JSON, suited for config-driven scenarios.
 
 ```python
 flow = {
-    "name": "提交并等待结果",
+    "name": "submit_and_wait",
     "commands": [
         {"launch": {}},
-        {"tap": {"text": "提交", "timeout": 10}},
-        {"inputText": {"text": "搜索内容", "clear": True}},
+        {"tap": {"text": "Submit", "timeout": 10}},
+        {"inputText": {"text": "search term", "clear": True}},
         {"pressKey": "enter"},
         {"scroll": "down"},
-        {"waitVisible": {"text": "结果", "timeout": 15}},
+        {"waitVisible": {"text": "Result", "timeout": 15}},
         {"sleep": 2},
         {"shell": "echo hello"},
         {"deeplink": "myapp://page/detail"},
@@ -222,11 +225,11 @@ flow = {
             "storeKey": "result_payload",
         }},
         {"retry": {
-            "name": "重试提交",
+            "name": "retry_submit",
             "maxRetries": 3,
             "delay": 2,
             "commands": [
-                {"tap": {"text": "提交"}},
+                {"tap": {"text": "Submit"}},
                 {"waitPayload": {"pattern": "contains:/api/submit", "timeout": 10}},
             ],
         }},
@@ -239,18 +242,18 @@ run = sdk.run_flow_spec(flow, raise_on_failure=False)
 
 ---
 
-## ScreenObject 页面对象
+## ScreenObject (Page Object)
 
-ScreenObject 把页面元素集中管理，减少 Locator 散落在流程代码里。
+ScreenObject centralizes page element definitions, keeping Locators out of flow code.
 
 ```python
-login_screen = sdk.screen("登录页", {
+login_screen = sdk.screen("login", {
     "username": {"resource_id": "com.example:id/username"},
     "password": {"resource_id": "com.example:id/password"},
-    "submit":   {"text": "登录"},
+    "submit":   {"text": "Login"},
 })
 
-run = sdk.run_steps("登录", [
+run = sdk.run_steps("login", [
     Actions.launch(),
     login_screen.tap("username"),
     login_screen.type_text("username", "user@example.com", clear=True),
@@ -262,13 +265,13 @@ run = sdk.run_steps("登录", [
 
 ---
 
-## Runtime Hooks 运行时干扰处理
+## Runtime Hooks (Interference Handling)
 
-Runtime Hooks 自动处理自动化过程中出现的横切干扰（Interference），如更新弹窗、广告、权限提示、验证码、网络错误等。
+Runtime Hooks automatically handle cross-cutting interference during automation — update dialogs, ads, permission prompts, captchas, network errors, etc.
 
-每个 Business Step 执行前后都会经历 **Stabilization**（稳定化）：观察当前 UI 状态 → 按优先级运行 Hook → 若 handled 则重新观察 → 直到稳定或产生终端结果。
+Every Business Step is wrapped in **Stabilization** before and after execution: observe the current UI state -> run hooks by priority -> if handled, re-observe -> repeat until stable or a terminal outcome is reached.
 
-### 注册 Hook
+### Registering Hooks
 
 ```python
 from operatekit import (
@@ -280,154 +283,156 @@ from operatekit import (
 
 sdk = AutomationSDK.create_android(package="com.example.app")
 
-# 权限弹窗处理
+# Permission prompts
 sdk.register_hook(PermissionHook(PermissionPolicy(
-    prompt_patterns=("permission", "允许"),
-    allow={"camera": Locator.text("允许"), "位置": Locator.text("始终允许")},
-    deny={"通讯录": Locator.text("拒绝")},
+    prompt_patterns=("permission",),
+    allow={"camera": Locator.text("Allow"), "location": Locator.text("Allow Always")},
+    deny={"contacts": Locator.text("Deny")},
 )))
 
-# 网络/服务器错误处理
+# Network / server errors
 sdk.register_hook(NetworkErrorHook(ErrorPolicy(
     rules=[
-        ErrorRule("网络不可用", HookOutcome.RETRY_STEP, reason="网络恢复后重试"),
-        ErrorRule("服务器维护", HookOutcome.MANUAL_REQUIRED, reason="需要人工确认"),
+        ErrorRule("network unavailable", HookOutcome.RETRY_STEP, reason="retry after recovery"),
+        ErrorRule("server maintenance", HookOutcome.MANUAL_REQUIRED, reason="needs manual check"),
     ],
-    error_patterns=("network", "server", "网络", "服务器"),
+    error_patterns=("network", "server"),
 )))
 
-# 验证码 → 人工介入
-sdk.register_hook(CaptchaHook(patterns=("验证码", "captcha", "人机验证")))
+# Captcha -> manual intervention
+sdk.register_hook(CaptchaHook(patterns=("captcha", "human verification")))
 
-# 更新弹窗 → 自动关闭
+# Update dialog -> auto-dismiss
 sdk.register_hook(UpdateDialogHook(
-    patterns=("新版本", "立即更新", "update"),
-    dismiss=Locator.text("以后再说"),
+    patterns=("new version", "update now"),
+    dismiss=Locator.text("Later"),
 ))
 
-# 广告弹窗 → 自动关闭
+# Ad dialog -> auto-dismiss
 sdk.register_hook(AdDialogHook(
-    patterns=("广告", "推荐", "限时"),
-    dismiss=Locator.text("关闭"),
+    patterns=("advertisement", "promotion"),
+    dismiss=Locator.text("Close"),
 ))
 ```
 
-### 内置 Generic Hooks
+### Built-in Generic Hooks
 
-| Hook | 默认优先级 | 行为 |
-|------|-----------|------|
-| `CaptchaHook` | 100 | 检测验证码 → `manual_required` |
-| `PermissionHook` | 90 | 已知权限 allow/deny → `handled`；未知权限 → `manual_required` |
-| `NetworkErrorHook` | 80 | 按 ErrorPolicy 规则 → `retry_step` / `fail_workflow` / `manual_required` |
-| `UpdateDialogHook` | 70 | 匹配更新弹窗 → 点击 dismiss → `handled` |
-| `AdDialogHook` | 70 | 匹配广告弹窗 → 点击 dismiss → `handled` |
-| `LegacyBlockerHook` | 0 | 兼容旧 BlockerRule → `handled` |
+| Hook | Default Priority | Behavior |
+|------|-----------------|----------|
+| `CaptchaHook` | 100 | Detects captcha -> `manual_required` |
+| `PermissionHook` | 90 | Known permission allow/deny -> `handled`; unknown -> `manual_required` |
+| `NetworkErrorHook` | 80 | Per ErrorPolicy rules -> `retry_step` / `fail_workflow` / `manual_required` |
+| `UpdateDialogHook` | 70 | Matches update dialog -> clicks dismiss -> `handled` |
+| `AdDialogHook` | 70 | Matches ad dialog -> clicks dismiss -> `handled` |
+| `LegacyBlockerHook` | 0 | Compatibility with old BlockerRule -> `handled` |
 
-优先级数值越高，越先执行。同一轮 Stabilization 中只有第一个非 noop 的 Hook 生效。
+Higher priority values execute first. Only the first non-noop hook takes effect per Stabilization round.
 
-### 自定义 App-specific Hook
+### Custom App-specific Hooks
 
 ```python
 from operatekit import HookResult, HookOutcome, RuntimeObservation, Locator
 
-class WechatEditExitHook:
-    name = "wechat_edit_exit"
+class SavePromptHook:
+    name = "save_prompt"
     priority = 60
 
     def handle(self, ctx, observation: RuntimeObservation) -> HookResult:
-        if "是否保存" not in observation.ui_tree:
+        if "save changes" not in observation.ui_tree.lower():
             return HookResult(HookOutcome.NOOP)
-        ctx.click(Locator.text("不保存"))
-        return HookResult(HookOutcome.HANDLED, reason="微信编辑退出弹窗已关闭")
+        ctx.click(Locator.text("Don't Save"))
+        return HookResult(HookOutcome.HANDLED, reason="save prompt dismissed")
 
-sdk.register_hook(WechatEditExitHook())
+sdk.register_hook(SavePromptHook())
 ```
 
-**Hook Outcome 语义：**
+**Hook Outcome semantics:**
 
-| Outcome | 含义 |
-|---------|------|
-| `NOOP` | 本 Hook 不处理当前状态 |
-| `HANDLED` | 已处理，Stabilization 重新观察 |
-| `RETRY_STEP` | 消费当前 Business Step 的 retry policy 重试 |
-| `MANUAL_REQUIRED` | 需要人工介入，工作流暂停 |
-| `FAIL_WORKFLOW` | 工作流失败 |
+| Outcome | Meaning |
+|---------|---------|
+| `NOOP` | This hook does not handle the current state |
+| `HANDLED` | Handled; Stabilization re-observes |
+| `RETRY_STEP` | Consumes the current Business Step's retry policy |
+| `MANUAL_REQUIRED` | Workflow paused — human intervention needed |
+| `FAIL_WORKFLOW` | Workflow failed |
 
-**Hook 只能使用 Dismissal Primitives：**
-- `ctx.click(locator, timeout=0.5)` — 点击
-- `ctx.press_key(key)` — 按键
-- `ctx.wait(seconds)` — 短暂等待
-- `ctx.notify(event, payload)` — 发送通知事件
+**Hooks may only use Dismissal Primitives:**
+- `ctx.click(locator, timeout=0.5)` — click
+- `ctx.press_key(key)` — press key
+- `ctx.wait(seconds)` — brief wait
+- `ctx.notify(event, payload)` — emit a notification event
 
-### InterferenceResult 类型化结果
+### InterferenceResult (Typed Result)
 
-当 Hook 产生终端结果时，`StepResult.interference` 提供类型化访问：
+When a hook produces a terminal outcome, `StepResult.interference` provides typed access:
 
 ```python
-run = sdk.run_steps("demo", [Actions.tap(Locator.text("提交"))])
+from operatekit import WorkflowStatus
+
+run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
 
 if run.status == WorkflowStatus.MANUAL_REQUIRED:
     result = run.step_results[-1]
 
-    # 类型化访问（推荐）
+    # Typed access (recommended)
     assert result.interference.is_manual_required
     assert result.interference.is_terminal
     print(result.interference.outcome)           # HookOutcome.MANUAL_REQUIRED
     print(result.interference.reason)            # "unknown permission prompt"
     print(result.interference.hook_name)         # "permission"
-    print(result.interference.last_observation)  # RuntimeObservation(ui_tree=..., package=..., activity=...)
+    print(result.interference.last_observation)  # RuntimeObservation(...)
 
-    # 向后兼容的 dict 访问（仍可用）
+    # Backward-compatible dict access (still available)
     print(run.metadata["runtime_hook"]["outcome"])  # "manual_required"
 ```
 
-正常通过的步骤 `interference` 为 `None`。
+`interference` is `None` for steps that pass normally.
 
-### StabilizationConfig 预算配置
+### StabilizationConfig (Budget)
 
 ```python
-from operatekit import StabilizationConfig
+from operatekit import StabilizationConfig, TargetSpec
 
 sdk = AutomationSDK.create_with_drivers(
     target=TargetSpec.android("com.example.app"),
     surface=surface,
     artifacts_dir="./artifacts",
     stabilization=StabilizationConfig(
-        max_rounds=5,          # 每个 phase 最多观察轮数
-        timeout_seconds=5.0,   # 每个 phase 最长耗时
+        max_rounds=5,          # max observation rounds per phase
+        timeout_seconds=5.0,   # max elapsed time per phase
     ),
 )
 ```
 
-超出预算会产生 `fail_workflow` 结果。
+Exceeding the budget produces a `fail_workflow` outcome.
 
 ---
 
-## 观测与网络抓包
+## Observation & Network Capture
 
-OperateKit 将网络抓包建模为观测（Observation），业务流程通过 `wait_observation` / `wait_payload` 等待特定网络响应。
+OperateKit models network capture as Observations. Business workflows use `wait_observation` / `wait_payload` to wait for specific network responses.
 
-### 启动 mitmproxy 抓包
+### Starting mitmproxy Capture
 
 ```python
-# 基础抓包
+# Basic capture
 proxy = sdk.mitm_proxy(port=8080, endpoint_patterns=["/api/submit", "/api/result"])
 
-# Android 一键抓包（ADB 反向代理 + mitmproxy）
+# Android one-step capture (ADB reverse proxy + mitmproxy)
 session = sdk.android_mitm_session(
     port=8080,
-    route="adb_reverse",      # "adb_reverse" 或 "wifi"
+    route="adb_reverse",      # "adb_reverse" or "wifi"
     endpoint_patterns=["/api/*"],
 )
 ```
 
-### 等待网络观测
+### Waiting for Network Observations
 
 ```python
-run = sdk.run_steps("抓包流程", [
+run = sdk.run_steps("capture_flow", [
     Actions.launch(),
     Actions.capture_cursor("before"),
-    Actions.tap(Locator.text("提交")),
+    Actions.tap(Locator.text("Submit")),
     Actions.wait_payload(
         "contains:/api/result",
         cursor_key="before",
@@ -436,54 +441,53 @@ run = sdk.run_steps("抓包流程", [
     ),
 ])
 
-# 获取观测快照
+# Get observation snapshot
 snapshot = sdk.snapshot_observation("api_result", fields=["data", "code"])
 print(snapshot.hash)
 ```
 
-### 观测类型
+### Observation Kinds
 
 ```python
 from operatekit import ObservationKind
 
-# 支持的观测类型
-ObservationKind.NETWORK     # 网络请求/响应
-ObservationKind.UI_TREE     # UI 层次结构
-ObservationKind.SCREENSHOT  # 截图
-ObservationKind.HOST        # 主机操作
-ObservationKind.FILE        # 文件
-ObservationKind.LOG         # 日志
-ObservationKind.DECISION    # 决策记录
+ObservationKind.NETWORK     # Network request/response
+ObservationKind.UI_TREE     # UI hierarchy
+ObservationKind.SCREENSHOT  # Screenshot
+ObservationKind.HOST        # Host operations
+ObservationKind.FILE        # File
+ObservationKind.LOG         # Log
+ObservationKind.DECISION    # Decision record
 ```
 
 ---
 
-## Trace 执行追踪
+## Trace (Execution Recording)
 
-Trace 记录每个步骤的执行细节，用于调试和审计。
+Trace records execution details for each step, useful for debugging and auditing.
 
 ```python
 from operatekit import TraceConfig
 
 recorder = sdk.enable_trace(TraceConfig(
-    capture_ui_tree=False,       # 是否在每步前保存 UI XML
-    capture_screenshot=False,    # 是否在每步前截图
-    screenshot_on_error=True,    # 步骤失败时截图
+    capture_ui_tree=False,       # save UI XML before each step
+    capture_screenshot=False,    # screenshot before each step
+    screenshot_on_error=True,    # screenshot on step failure
 ))
 
 sdk.run_steps("traced_flow", [
     Actions.launch(),
-    Actions.tap(Locator.text("提交")),
+    Actions.tap(Locator.text("Submit")),
 ])
 
-# 追踪数据写入 artifacts/trace/trace.jsonl
+# Trace data written to artifacts/trace/trace.jsonl
 ```
 
 ---
 
 ## Agent ToolRegistry
 
-ToolRegistry 为未来的 LLM/Agent 集成提供薄接入层。Agent 代码通过注册的工具调用 RPA 运行时，而不直接接触底层驱动。
+ToolRegistry provides a thin integration layer for future LLM/Agent use. Agent code invokes registered tools instead of touching underlying drivers directly.
 
 ```python
 from operatekit import AutomationTool, ToolRegistry, RiskPolicy
@@ -492,38 +496,38 @@ registry = ToolRegistry()
 
 registry.register(AutomationTool(
     name="search",
-    description="在应用中搜索关键词",
+    description="Search for a keyword in the app",
     func=lambda keyword: sdk.run_steps("search", [
-        Actions.tap(Locator.text("搜索")),
+        Actions.tap(Locator.text("Search")),
         Actions.type_text(keyword, clear=True),
         Actions.press_key("enter"),
     ]),
     risk_policy=RiskPolicy.low(),
 ))
 
-# 高风险工具需要审批
+# High-risk tools require approval
 registry.register(AutomationTool(
     name="delete_account",
-    description="删除用户账号",
+    description="Delete the user account",
     func=lambda: sdk.run_steps("delete", [
-        Actions.tap(Locator.text("删除账号")),
-        Actions.tap(Locator.text("确认")),
+        Actions.tap(Locator.text("Delete Account")),
+        Actions.tap(Locator.text("Confirm")),
     ]),
-    risk_policy=RiskPolicy.high("不可逆操作", requires_approval=True),
+    risk_policy=RiskPolicy.high("irreversible operation", requires_approval=True),
 ))
 
-# 调用
+# Invoke
 tool = registry.get("search")
 tool.invoke("OperateKit")
 
-# 高风险工具未审批会抛 PermissionError
+# High-risk tool raises PermissionError without approval
 tool = registry.get("delete_account")
-tool.invoke(approved=True)  # 必须显式审批
+tool.invoke(approved=True)  # explicit approval required
 ```
 
 ---
 
-## 架构概览
+## Architecture Overview
 
 ```
 solutions/*
@@ -538,8 +542,8 @@ operatekit.plugins.capture   # mitmproxy
   -> operatekit.core
 ```
 
-**关键约束：**
-- `core` 和 `runtime` 不导入 `adbutils`、`uiautomator2`、`pywinauto` 或 `mitmproxy`
-- Runtime Hooks 只通过 Dismissal Primitives 操作 UI，不直接调用平台驱动
-- Hook Registry 在 SDK/Runner 层配置，不写进 FlowSpec
-- Agent 层在确定性 RPA 运行时之上，不绕过 `Actions` / `WorkflowRunner`
+**Key constraints:**
+- `core` and `runtime` never import `adbutils`, `uiautomator2`, `pywinauto`, or `mitmproxy`
+- Runtime Hooks operate through Dismissal Primitives only — no direct platform driver calls
+- Hook Registry is configured at the SDK/Runner level, not inside FlowSpec
+- Agent layer sits above the deterministic RPA runtime — never bypasses `Actions` / `WorkflowRunner`
