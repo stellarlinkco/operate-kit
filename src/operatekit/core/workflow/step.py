@@ -7,7 +7,7 @@ import time
 from operatekit.core.shared.errors import StepExecutionError
 from operatekit.core.shared.ids import StepId
 from operatekit.core.shared.time import utc_now_iso
-from operatekit.core.workflow.value_objects import HookOutcome, RetryPolicy, StepStatus
+from operatekit.core.workflow.value_objects import HookOutcome, InterferenceResult, RetryPolicy, StabilizationResult, StepStatus
 
 StepFn = Callable[[Any], Any]
 
@@ -23,9 +23,10 @@ class StepResult:
     error: str | None = None
     output: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    interference: InterferenceResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "step_id": self.step_id,
             "name": self.name,
             "status": self.status.value,
@@ -36,6 +37,9 @@ class StepResult:
             "output": self.output,
             "metadata": self.metadata,
         }
+        if self.interference is not None:
+            d["interference"] = self.interference.to_dict()
+        return d
 
 
 @dataclass
@@ -53,6 +57,7 @@ class Step:
         attempts = 0
         last_error: str | None = None
         last_metadata: dict[str, Any] | None = None
+        last_interference: InterferenceResult | None = None
 
         for attempt in range(1, self.retry_policy.max_attempts + 1):
             attempts = attempt
@@ -96,9 +101,12 @@ class Step:
                 last_error = f"{type(exc).__name__}: {exc}"
                 if isinstance(exc, StepExecutionError):
                     failed_result = getattr(exc, "step_result", None)
-                    failed_metadata = getattr(failed_result, "metadata", None)
-                    if isinstance(failed_metadata, dict):
-                        last_metadata = failed_metadata
+                    if failed_result is not None:
+                        failed_metadata = getattr(failed_result, "metadata", None)
+                        if isinstance(failed_metadata, dict):
+                            last_metadata = failed_metadata
+                        if getattr(failed_result, "interference", None) is not None:
+                            last_interference = failed_result.interference
                 if ctx.trace is not None:
                     ctx.trace.step_error(ctx, self, attempt, exc)
                 if attempt >= self.retry_policy.max_attempts:
@@ -117,6 +125,7 @@ class Step:
             ended_at=ended,
             error=last_error,
             metadata={**self.metadata, **(last_metadata or {})},
+            interference=last_interference,
         )
         if ctx.trace is not None:
             ctx.trace.after_step(ctx, self, result)
@@ -127,23 +136,15 @@ class Step:
         return Step(name=name, action=func, retry_policy=retry_policy or RetryPolicy(), metadata=metadata, hookable=hookable)
 
 
-def _hook_step_result(step: Step, started: str, attempts: int, hook_result: Any) -> StepResult:
-    observation = hook_result.observation
-    metadata = {
-        **step.metadata,
-        "runtime_hook": {
-            "outcome": hook_result.outcome.value,
-            "reason": hook_result.reason,
-            "hook": hook_result.hook_name,
-            "last_observation": None if observation is None else {
-                "ui_tree": observation.ui_tree,
-                "package": observation.package,
-                "activity": observation.activity,
-                "metadata": observation.metadata,
-            },
-            "metadata": hook_result.metadata,
-        },
-    }
+def _hook_step_result(step: Step, started: str, attempts: int, hook_result: StabilizationResult) -> StepResult:
+    interference = InterferenceResult(
+        outcome=hook_result.outcome,
+        reason=hook_result.reason,
+        hook_name=hook_result.hook_name,
+        last_observation=hook_result.observation,
+        metadata=hook_result.metadata,
+    )
+    metadata = {**step.metadata, "runtime_hook": interference.to_dict()}
     return StepResult(
         step_id=str(step.step_id),
         name=step.name,
@@ -153,6 +154,7 @@ def _hook_step_result(step: Step, started: str, attempts: int, hook_result: Any)
         ended_at=utc_now_iso(),
         error=hook_result.reason or f"runtime hook requested {hook_result.outcome.value}",
         metadata=metadata,
+        interference=interference,
     )
 
 

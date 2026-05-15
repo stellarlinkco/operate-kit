@@ -46,6 +46,38 @@ class HookResult:
 
 
 @dataclass(frozen=True)
+class InterferenceResult:
+    outcome: HookOutcome
+    reason: str | None = None
+    hook_name: str | None = None
+    last_observation: RuntimeObservation | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.outcome in (HookOutcome.MANUAL_REQUIRED, HookOutcome.FAIL_WORKFLOW)
+
+    @property
+    def is_manual_required(self) -> bool:
+        return self.outcome == HookOutcome.MANUAL_REQUIRED
+
+    def to_dict(self) -> dict[str, Any]:
+        obs = self.last_observation
+        return {
+            "outcome": self.outcome.value,
+            "reason": self.reason,
+            "hook": self.hook_name,
+            "last_observation": None if obs is None else {
+                "ui_tree": obs.ui_tree,
+                "package": obs.package,
+                "activity": obs.activity,
+                "metadata": obs.metadata,
+            },
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(frozen=True)
 class StabilizationResult:
     outcome: HookOutcome
     reason: str | None = None

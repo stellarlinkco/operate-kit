@@ -11,6 +11,7 @@ from operatekit import (
     FlowCompiler,
     HookOutcome,
     HookResult,
+    InterferenceResult,
     Locator,
     NetworkErrorHook,
     PermissionHook,
@@ -121,6 +122,7 @@ def test_unknown_permission_prompt_requires_manual_intervention_without_click(tm
     run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
 
     assert run.status.value == "manual_required"
+    assert run.step_results[0].interference.is_manual_required is True
     assert run.metadata["runtime_hook"]["outcome"] == "manual_required"
     assert run.metadata["runtime_hook"]["reason"] == "unknown permission prompt"
     assert [event for event in surface.events if event[0] == "click"] == []
@@ -209,6 +211,7 @@ def test_unknown_network_or_server_error_fails_workflow_with_hook_metadata(tmp_p
     run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))], raise_on_failure=False)
 
     assert run.status.value == "failed"
+    assert run.step_results[0].interference.outcome == HookOutcome.FAIL_WORKFLOW
     assert run.metadata["runtime_hook"]["outcome"] == "fail_workflow"
     assert run.metadata["runtime_hook"]["reason"] == "unknown network/server error"
 
@@ -226,6 +229,8 @@ def test_production_captcha_hook_returns_manual_required(tmp_path):
     run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
 
     assert run.status.value == "manual_required"
+    assert run.step_results[0].interference.is_manual_required is True
+    assert run.step_results[0].interference.reason == "captcha/human verification detected"
     assert run.metadata["runtime_hook"]["outcome"] == "manual_required"
     assert run.metadata["runtime_hook"]["reason"] == "captcha/human verification detected"
 
@@ -265,6 +270,8 @@ def test_manual_required_hook_stops_workflow_with_observation_metadata(tmp_path)
     run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
 
     assert run.status.value == "manual_required"
+    assert run.step_results[0].interference.is_manual_required is True
+    assert run.step_results[0].interference.last_observation.ui_tree == "<captcha/>"
     assert run.metadata["runtime_hook"]["reason"] == "captcha detected"
     assert run.metadata["runtime_hook"]["last_observation"]["ui_tree"] == "<captcha/>"
     assert sdk.context.surface.events == [("observe",)]
@@ -364,6 +371,8 @@ def test_stabilization_budget_exhaustion_fails_workflow_with_last_observation(tm
     run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))], raise_on_failure=False)
 
     assert run.status.value == "failed"
+    assert run.step_results[0].interference.outcome == HookOutcome.FAIL_WORKFLOW
+    assert run.step_results[0].interference.last_observation.ui_tree == "<blocked/>"
     assert run.metadata["runtime_hook"]["outcome"] == "fail_workflow"
     assert run.metadata["runtime_hook"]["last_observation"]["ui_tree"] == "<blocked/>"
 
@@ -463,6 +472,7 @@ def test_nested_retry_block_child_manual_required_stops_outer_workflow(tmp_path)
     run = sdk.run_steps("demo", [Actions.retry_block("nested", [Actions.tap(Locator.text("Submit"))], max_retries=3)])
 
     assert run.status.value == "manual_required"
+    assert run.step_results[0].interference.is_manual_required is True
     assert run.metadata["runtime_hook"]["outcome"] == "manual_required"
     assert run.metadata["runtime_hook"]["reason"] == "captcha detected"
     assert [event for event in surface.events if event == ("click", "Submit")] == []
@@ -483,6 +493,7 @@ def test_nested_retry_block_does_not_retry_after_child_retry_step_exhausted(tmp_
     run = sdk.run_steps("demo", [Actions.retry_block("nested", [child], max_retries=3)], raise_on_failure=False)
 
     assert run.status.value == "failed"
+    assert run.step_results[0].interference.outcome == HookOutcome.RETRY_STEP
     assert run.metadata["runtime_hook"]["outcome"] == "retry_step"
     assert [event for event in surface.events if event == ("observe",)] == [("observe",), ("observe",)]
     assert [event for event in surface.events if event == ("click", "Submit")] == []
@@ -601,3 +612,98 @@ def test_runtime_hook_events_are_emitted_independently_of_step_results(tmp_path)
     assert run.status.value == "passed"
     assert [result.name for result in run.step_results] == ["tap"]
     assert "runtime_hook" not in run.step_results[0].metadata
+
+
+def test_manual_required_produces_typed_interference_result(tmp_path):
+    surface = FakeSurface()
+    surface.trees = ["<dialog>permission required</dialog>"]
+    sdk = AutomationSDK.create_with_drivers(
+        target=TargetSpec.android("com.example"),
+        surface=surface,
+        artifacts_dir=tmp_path,
+    )
+    sdk.register_hook(PermissionHook(PermissionPolicy(prompt_patterns=("permission",))))
+
+    run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
+
+    step_result = run.step_results[0]
+    assert isinstance(step_result.interference, InterferenceResult)
+    assert step_result.interference.outcome == HookOutcome.MANUAL_REQUIRED
+    assert step_result.interference.reason == "unknown permission prompt"
+    assert step_result.interference.hook_name == "permission"
+    assert step_result.interference.is_manual_required is True
+    assert step_result.interference.is_terminal is True
+    assert step_result.interference.last_observation is not None
+    assert "permission" in step_result.interference.last_observation.ui_tree
+    # backward compat: run.metadata still has runtime_hook dict
+    assert run.metadata["runtime_hook"]["outcome"] == "manual_required"
+
+
+def test_fail_workflow_produces_typed_interference_result(tmp_path):
+    surface = FakeSurface()
+    surface.trees = ["<error>server temporarily unavailable</error>"]
+    sdk = AutomationSDK.create_with_drivers(
+        target=TargetSpec.android("com.example"),
+        surface=surface,
+        artifacts_dir=tmp_path,
+    )
+    sdk.register_hook(NetworkErrorHook(ErrorPolicy(error_patterns=("network", "server"))))
+
+    run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))], raise_on_failure=False)
+
+    step_result = run.step_results[0]
+    assert isinstance(step_result.interference, InterferenceResult)
+    assert step_result.interference.outcome == HookOutcome.FAIL_WORKFLOW
+    assert step_result.interference.is_terminal is True
+    assert step_result.interference.is_manual_required is False
+    # backward compat
+    assert run.metadata["runtime_hook"]["outcome"] == "fail_workflow"
+
+
+def test_passed_step_has_no_interference(tmp_path):
+    sdk = AutomationSDK.create_with_drivers(
+        target=TargetSpec.android("com.example"),
+        surface=FakeSurface(),
+        artifacts_dir=tmp_path,
+    )
+    run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
+
+    assert run.status.value == "passed"
+    assert run.step_results[0].interference is None
+
+
+def test_nested_retry_propagates_typed_interference_to_outer_step(tmp_path):
+    surface = FakeSurface()
+    surface.trees = ["<captcha/>"]
+    sdk = AutomationSDK.create_with_drivers(
+        target=TargetSpec.android("com.example"),
+        surface=surface,
+        artifacts_dir=tmp_path,
+    )
+    sdk.register_hook(CaptchaHook())
+
+    run = sdk.run_steps("demo", [Actions.retry_block("nested", [Actions.tap(Locator.text("Submit"))], max_retries=3)])
+
+    assert run.status.value == "manual_required"
+    outer_result = run.step_results[0]
+    assert isinstance(outer_result.interference, InterferenceResult)
+    assert outer_result.interference.outcome == HookOutcome.MANUAL_REQUIRED
+    assert outer_result.interference.reason == "captcha detected"
+
+
+def test_step_result_to_dict_includes_interference(tmp_path):
+    surface = FakeSurface()
+    surface.trees = ["<dialog>permission required</dialog>"]
+    sdk = AutomationSDK.create_with_drivers(
+        target=TargetSpec.android("com.example"),
+        surface=surface,
+        artifacts_dir=tmp_path,
+    )
+    sdk.register_hook(PermissionHook(PermissionPolicy(prompt_patterns=("permission",))))
+
+    run = sdk.run_steps("demo", [Actions.tap(Locator.text("Submit"))])
+
+    d = run.step_results[0].to_dict()
+    assert d["interference"]["outcome"] == "manual_required"
+    assert d["interference"]["hook"] == "permission"
+    assert d["interference"]["last_observation"]["ui_tree"] == "<dialog>permission required</dialog>"

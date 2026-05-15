@@ -40,16 +40,15 @@ class WorkflowRunner:
             run.add_step_result(result)
             if result.status != StepStatus.PASSED:
                 failed = True
-                hook_metadata = result.metadata.get("runtime_hook") if isinstance(result.metadata, dict) else None
-                if hook_metadata and hook_metadata.get("outcome") == "manual_required":
-                    run.metadata["runtime_hook"] = hook_metadata
+                if result.interference is not None and result.interference.is_manual_required:
+                    run.metadata["runtime_hook"] = result.interference.to_dict()
                     run.finish(WorkflowStatus.MANUAL_REQUIRED)
                     if self.ledger is not None:
                         self.ledger.record_run(run)
                     ctx.notify("workflow.manual_required", {"name": name, "step": step.name, "reason": result.error})
                     return run
-                if hook_metadata:
-                    run.metadata["runtime_hook"] = hook_metadata
+                if result.interference is not None:
+                    run.metadata["runtime_hook"] = result.interference.to_dict()
                 run.finish(WorkflowStatus.FAILED)
                 if self.ledger is not None:
                     self.ledger.record_run(run)

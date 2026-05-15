@@ -5,7 +5,7 @@ from operatekit.core.observation.snapshot import ObservationSnapshot
 from operatekit.core.target.target import TargetKind, TargetSpec
 from operatekit.core.ui.locator import Locator, LocatorKind
 from operatekit.core.workflow.step import Step, StepResult
-from operatekit.core.workflow.value_objects import RetryPolicy, StepStatus, WorkflowStatus
+from operatekit.core.workflow.value_objects import InterferenceResult, RetryPolicy, StepStatus, WorkflowStatus
 from operatekit.rpa.actions import Actions
 from operatekit.rpa.blockers import AdDialogHook, BlockerManager, BlockerRule, CaptchaHook, ErrorPolicy, ErrorRule, LegacyBlockerHook, NetworkErrorHook, PermissionHook, PermissionPolicy, UpdateDialogHook
 from operatekit.rpa.flow_compiler import FlowCompiler
@@ -35,6 +35,7 @@ __all__ = [
     "HookContext",
     "HookOutcome",
     "HookResult",
+    "InterferenceResult",
     "LegacyBlockerHook",
     "Locator",
     "NetworkErrorHook",

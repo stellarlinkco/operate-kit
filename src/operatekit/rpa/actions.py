@@ -141,9 +141,7 @@ class Actions:
                     return
                 except StepExecutionError as exc:
                     failed_result = getattr(exc, "step_result", None)
-                    failed_metadata = getattr(failed_result, "metadata", None)
-                    hook_metadata = failed_metadata.get("runtime_hook") if isinstance(failed_metadata, dict) else None
-                    if hook_metadata is not None:
+                    if failed_result is not None and getattr(failed_result, "interference", None) is not None:
                         raise exc
                     last_error = f"{type(exc).__name__}: {exc}"
                     ctx.notify("retry_block.failed_attempt", {"name": name, "attempt": attempt, "error": last_error})
